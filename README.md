@@ -10,9 +10,8 @@ private repo, Hetzner project and tokens; only the tooling lives here.
 | --- | --- |
 | `flake.nix` | `packages.<system>.octodns`: octoDNS with the Hetzner provider, pinned through `flake.lock` |
 | `.github/workflows/plan.yml` | Reusable workflow: validate, dry-run `octodns-sync` with a read-only token, post the plan as a PR comment |
-| `.github/workflows/apply.yml` | Reusable workflow: on a push to main, validate and `octodns-sync --doit` with the read-write token |
 | `.github/workflows/dump.yml` | Reusable workflow, run by hand: read a live zone from Hetzner and print it as YAML, for onboarding a zone that already has records |
-| `actions/apply/action.yml` | The apply steps as a composite action, for domain repos owned by another account: the caller's own job declares `environment: production` and passes the token |
+| `actions/apply/action.yml` | Composite action, used from the domain repo's own apply job: validate and `octodns-sync --doit` with the read-write token |
 | `docs/` | Spike findings and provider research carried over from kanerva.io |
 
 ## Using it from a domain repo
@@ -29,8 +28,8 @@ inputs.dns-as-code = {
 packages.x86_64-linux.octodns = dns-as-code.packages.x86_64-linux.octodns;
 ```
 
-And calls the workflows: plan on pull requests (posted as a PR comment), apply on a
-push to main.
+And calls them: the plan workflow on pull requests (posted as a PR comment), the apply
+action on a push to main.
 
 ```yaml
 on:
@@ -54,9 +53,20 @@ jobs:
 
   apply:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    uses: Tapiiri/dns-as-code/.github/workflows/apply.yml@main
-    secrets: inherit
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: dns-apply
+      cancel-in-progress: false
+    steps:
+      - uses: Tapiiri/dns-as-code/actions/apply@main
+        with:
+          hetzner-token: ${{ secrets.HETZNER_TOKEN }}
 ```
+
+Apply is an action, not a reusable workflow, because GitHub does not pass an
+environment secret into a reusable workflow owned by another account. Declaring
+the job in the domain repo reads `production` and its secret there.
 
 | Secret | Where in the domain repo |
 | --- | --- |

@@ -5,11 +5,11 @@
 # the commit is still the tip of main, so an older run can never overwrite a
 # newer one. octoDNS owns the zone completely.
 #
-# Why an action and not only a reusable workflow: the read-write token is an
+# Why an action and not a reusable workflow: the read-write token is an
 # environment secret, and environment secrets do not reach a reusable workflow
-# owned by a different account (kanerva.io worked, expressive.fi under
-# ExpressiveJam did not). As an action it runs inside the caller's own job,
-# which declares the environment and passes the secret in explicitly:
+# owned by a different account (expressive.fi, under ExpressiveJam, found it
+# empty on every run). As an action it runs inside the caller's own job, which
+# declares the environment and passes the secret in explicitly:
 #
 #   apply:
 #     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
