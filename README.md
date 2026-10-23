@@ -10,6 +10,7 @@ private repo, Hetzner project and tokens; only the tooling lives here.
 | --- | --- |
 | `flake.nix` | `packages.<system>.octodns`: octoDNS with the Hetzner provider, pinned through `flake.lock` |
 | `.github/workflows/plan.yml` | Reusable workflow: validate, then dry-run `octodns-sync` with a read-only token |
+| `.github/workflows/apply.yml` | Reusable workflow: on a push to main, validate and `octodns-sync --doit` with the read-write token |
 | `docs/` | Spike findings and provider research carried over from kanerva.io |
 
 ## Using it from a domain repo
@@ -26,15 +27,29 @@ inputs.dns-as-code = {
 packages.x86_64-linux.octodns = dns-as-code.packages.x86_64-linux.octodns;
 ```
 
-And calls the workflow:
+And calls the workflows: plan on branches, apply on main.
 
 ```yaml
 jobs:
   plan:
+    if: github.ref != 'refs/heads/main'
     uses: Tapiiri/dns-as-code/.github/workflows/plan.yml@main
     secrets:
       hetzner-token-ro: ${{ secrets.HETZNER_TOKEN_RO }}
+
+  apply:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    uses: Tapiiri/dns-as-code/.github/workflows/apply.yml@main
+    secrets: inherit
 ```
+
+| Secret | Where in the domain repo |
+| --- | --- |
+| `HETZNER_TOKEN_RO`, read-only | Repository secret |
+| `HETZNER_TOKEN`, read and write | Environment secret in `production`, with deployments restricted to `main` |
+
+The apply job runs one at a time per repo and refuses unless its commit is still the
+tip of main, so DNS always converges on the newest main.
 
 `config/production.yaml` must set `backend: hcloud` on the Hetzner provider; the
 provider's default points at the DNS API Hetzner removed in May 2026.
