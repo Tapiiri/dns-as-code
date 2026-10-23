@@ -1,0 +1,89 @@
+# Reusable: read a live zone from Hetzner and print it as octoDNS YAML.
+#
+# For onboarding a zone that already holds records: the dump becomes the
+# domain repo's first zone file, so the first plan is zero changes instead of
+# deleting everything the YAML does not yet contain.
+#
+# Read-only. It generates its own config naming only the requested zone with
+# Hetzner as the source, so it works before the domain repo lists the zone,
+# and it writes nothing to the repo or to DNS. The YAML goes to the log and
+# the job summary for a person or agent to commit.
+#
+# Builds `.#octodns` from the caller's flake, like plan and apply.
+
+name: dump
+
+on:
+  workflow_call:
+    inputs:
+      zone:
+        description: Zone to dump, e.g. example.com
+        type: string
+        required: true
+    secrets:
+      hetzner-token-ro:
+        description: Hetzner Cloud API token, read-only
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+
+      - name: Build octoDNS
+        run: nix build .#octodns --out-link octodns
+
+      - name: Dump
+        env:
+          HETZNER_TOKEN: ${{ secrets.hetzner-token-ro }}
+          ZONE: ${{ inputs.zone }}
+        run: |
+          if [ -z "$HETZNER_TOKEN" ]; then
+            echo "::error::the read-only Hetzner token secret is empty or not set"
+            exit 1
+          fi
+          zone="${ZONE%.}"
+          if ! [[ "$zone" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]]; then
+            echo "::error::not a zone name: $ZONE"
+            exit 1
+          fi
+
+          # Same provider settings as a domain repo's config: backend: hcloud
+          # is required, because the provider's default points at the DNS API
+          # Hetzner removed in May 2026.
+          mkdir -p "$RUNNER_TEMP/dump"
+          cat > "$RUNNER_TEMP/dump.yaml" <<EOF
+          providers:
+            hetzner:
+              class: octodns_hetzner.HetznerProvider
+              backend: hcloud
+              token: env/HETZNER_TOKEN
+          zones:
+            ${zone}.:
+              sources:
+                - hetzner
+              targets: []
+          EOF
+
+          octodns/bin/octodns-dump --config-file "$RUNNER_TEMP/dump.yaml" \
+            --output-dir "$RUNNER_TEMP/dump" "${zone}." hetzner
+
+          file="$RUNNER_TEMP/dump/${zone}.yaml"
+          echo "----- zones/${zone}.yaml -----"
+          cat "$file"
+          echo "----- end -----"
+          {
+            echo "### Live zone \`${zone}\` as octoDNS YAML"
+            echo
+            echo "Commit this unchanged as \`zones/${zone}.yaml\` before listing the zone in the config."
+            echo
+            echo '```yaml'
+            cat "$file"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -11,6 +11,7 @@ private repo, Hetzner project and tokens; only the tooling lives here.
 | `flake.nix` | `packages.<system>.octodns`: octoDNS with the Hetzner provider, pinned through `flake.lock` |
 | `.github/workflows/plan.yml` | Reusable workflow: validate, dry-run `octodns-sync` with a read-only token, post the plan as a PR comment |
 | `.github/workflows/apply.yml` | Reusable workflow: on a push to main, validate and `octodns-sync --doit` with the read-write token |
+| `.github/workflows/dump.yml` | Reusable workflow, run by hand: read a live zone from Hetzner and print it as YAML, for onboarding a zone that already has records |
 | `docs/` | Spike findings and provider research carried over from kanerva.io |
 
 ## Using it from a domain repo
