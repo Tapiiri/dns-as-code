@@ -18,5 +18,8 @@ jobs:
       - name: Formatting
         run: nix fmt -- --check .
 
+      - name: Lint workflows
+        run: nix shell --inputs-from . nixpkgs#actionlint nixpkgs#shellcheck -c actionlint
+
       - name: Build octoDNS
         run: nix build .#octodns

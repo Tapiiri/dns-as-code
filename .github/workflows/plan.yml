@@ -5,6 +5,10 @@
 # the octoDNS version, and `nix flake update dns-as-code` is the upgrade.
 #
 # Never passes --doit, so it cannot change DNS. Give it the READ-ONLY token.
+#
+# The plan goes to the job summary, and on a pull_request event also to one
+# PR comment that is updated in place on every push. The caller must grant
+# `pull-requests: write` for the comment.
 
 name: plan
 
@@ -22,6 +26,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   plan:
@@ -48,13 +53,47 @@ jobs:
             exit 1
           fi
 
+      # octodns-sync writes the plan to stdout and its logging to stderr, so
+      # plan.txt holds just the plan while the log keeps everything.
       - name: Plan
         env:
           HETZNER_TOKEN: ${{ secrets.hetzner-token-ro }}
           CONFIG_FILE: ${{ inputs.config-file }}
         run: |
+          set -o pipefail
           if [ -z "$HETZNER_TOKEN" ]; then
             echo "::error::the read-only Hetzner token secret is empty or not set"
             exit 1
           fi
-          octodns/bin/octodns-sync --config-file "$CONFIG_FILE"
+          octodns/bin/octodns-sync --config-file "$CONFIG_FILE" | tee plan.txt
+
+      - name: Report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          marker='<!-- dns-as-code:plan -->'
+          {
+            echo "$marker"
+            echo "### DNS plan for \`${HEAD_SHA:0:7}\`"
+            echo
+            echo "Read-only dry run against the live zone. Merging to main applies exactly this, unless the zone or main changes first."
+            echo
+            echo '```'
+            head -c 60000 plan.txt
+            echo '```'
+          } > comment.md
+          cat comment.md >> "$GITHUB_STEP_SUMMARY"
+
+          [ -n "$PR_NUMBER" ] || exit 0
+
+          # One comment per PR, found by its marker and edited in place.
+          existing="$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+            --jq "[.[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\")))][0].id // empty" \
+            | head -n1)"
+          if [ -n "$existing" ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -F body=@comment.md > /dev/null
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F body=@comment.md > /dev/null
+          fi

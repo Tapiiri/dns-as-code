@@ -9,7 +9,7 @@ private repo, Hetzner project and tokens; only the tooling lives here.
 | Path | What it is |
 | --- | --- |
 | `flake.nix` | `packages.<system>.octodns`: octoDNS with the Hetzner provider, pinned through `flake.lock` |
-| `.github/workflows/plan.yml` | Reusable workflow: validate, then dry-run `octodns-sync` with a read-only token |
+| `.github/workflows/plan.yml` | Reusable workflow: validate, dry-run `octodns-sync` with a read-only token, post the plan as a PR comment |
 | `.github/workflows/apply.yml` | Reusable workflow: on a push to main, validate and `octodns-sync --doit` with the read-write token |
 | `docs/` | Spike findings and provider research carried over from kanerva.io |
 
@@ -27,12 +27,25 @@ inputs.dns-as-code = {
 packages.x86_64-linux.octodns = dns-as-code.packages.x86_64-linux.octodns;
 ```
 
-And calls the workflows: plan on branches, apply on main.
+And calls the workflows: plan on pull requests (posted as a PR comment), apply on a
+push to main.
 
 ```yaml
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
   plan:
-    if: github.ref != 'refs/heads/main'
+    if: github.event_name != 'push'
+    permissions:
+      contents: read
+      pull-requests: write
     uses: Tapiiri/dns-as-code/.github/workflows/plan.yml@main
     secrets:
       hetzner-token-ro: ${{ secrets.HETZNER_TOKEN_RO }}
