@@ -55,7 +55,9 @@ jobs:
 
       # The plan comes out through octoDNS's logger on stderr, not stdout.
       # --quiet keeps only warnings, errors and the plan, so plan.txt is the
-      # plan plus anything worth a warning, minus the logger's header line.
+      # plan plus anything worth a warning. Dropped from the comment, but kept
+      # in the log: the logger's header line, and the SOA warning the Hetzner
+      # provider prints on every run (SOA is outside octoDNS's control).
       - name: Plan
         env:
           HETZNER_TOKEN: ${{ secrets.hetzner-token-ro }}
@@ -68,7 +70,8 @@ jobs:
           fi
           octodns/bin/octodns-sync --quiet --config-file "$CONFIG_FILE" 2>&1 \
             | tee /dev/stderr \
-            | sed -E '/^[0-9T:-]+ +\[[0-9]+\] +INFO +Plan *$/d' > plan.txt
+            | sed -E -e '/^[0-9T:-]+ +\[[0-9]+\] +INFO +Plan *$/d' \
+                -e '/WARNING .*populate: skipping unsupported SOA record$/d' > plan.txt
 
       - name: Report
         env:
