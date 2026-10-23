@@ -53,8 +53,9 @@ jobs:
             exit 1
           fi
 
-      # octodns-sync writes the plan to stdout and its logging to stderr, so
-      # plan.txt holds just the plan while the log keeps everything.
+      # The plan comes out through octoDNS's logger on stderr, not stdout.
+      # --quiet keeps only warnings, errors and the plan, so plan.txt is the
+      # plan plus anything worth a warning, minus the logger's header line.
       - name: Plan
         env:
           HETZNER_TOKEN: ${{ secrets.hetzner-token-ro }}
@@ -65,7 +66,9 @@ jobs:
             echo "::error::the read-only Hetzner token secret is empty or not set"
             exit 1
           fi
-          octodns/bin/octodns-sync --config-file "$CONFIG_FILE" | tee plan.txt
+          octodns/bin/octodns-sync --quiet --config-file "$CONFIG_FILE" 2>&1 \
+            | tee /dev/stderr \
+            | sed -E '/^[0-9T:-]+ +\[[0-9]+\] +INFO +Plan *$/d' > plan.txt
 
       - name: Report
         env:
