@@ -1,0 +1,60 @@
+# Reusable: dry-run octoDNS for the calling domain repo.
+#
+# Runs in the CALLER's checkout and builds `.#octodns` from the caller's flake,
+# which re-exports this repo's package. The caller's flake.lock therefore pins
+# the octoDNS version, and `nix flake update dns-as-code` is the upgrade.
+#
+# Never passes --doit, so it cannot change DNS. Give it the READ-ONLY token.
+
+name: plan
+
+on:
+  workflow_call:
+    inputs:
+      config-file:
+        description: octoDNS config, relative to the caller's repo root
+        type: string
+        default: config/production.yaml
+    secrets:
+      hetzner-token-ro:
+        description: Hetzner Cloud API token, read-only
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+
+      - name: Build octoDNS
+        run: nix build .#octodns --out-link octodns
+
+      # What the commit hooks check locally. Hooks never run on a push from a
+      # cloud session, so CI repeats them. The provider makes no request at
+      # construction, so a dummy token is safe, but it must be non-empty.
+      - name: Validate
+        env:
+          HETZNER_TOKEN: dummy-token-for-validate-only
+          CONFIG_FILE: ${{ inputs.config-file }}
+        run: |
+          octodns/bin/octodns-validate --config-file "$CONFIG_FILE"
+          if grep -rn -e '__DOMAIN__' -e '__MIGADU_VERIFY_TOKEN__' zones/; then
+            echo "::error::unreplaced template placeholder in zones/"
+            exit 1
+          fi
+
+      - name: Plan
+        env:
+          HETZNER_TOKEN: ${{ secrets.hetzner-token-ro }}
+          CONFIG_FILE: ${{ inputs.config-file }}
+        run: |
+          if [ -z "$HETZNER_TOKEN" ]; then
+            echo "::error::the read-only Hetzner token secret is empty or not set"
+            exit 1
+          fi
+          octodns/bin/octodns-sync --config-file "$CONFIG_FILE"
