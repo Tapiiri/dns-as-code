@@ -1,0 +1,98 @@
+# Composite action: apply the calling domain repo's main to its zone.
+#
+# The git remote is the source of truth and DNS follows it. Use it only in a
+# job that runs for a push to main: it refuses any other ref, and skips unless
+# the commit is still the tip of main, so an older run can never overwrite a
+# newer one. octoDNS owns the zone completely.
+#
+# Why an action and not only a reusable workflow: the read-write token is an
+# environment secret, and environment secrets do not reach a reusable workflow
+# owned by a different account (kanerva.io worked, expressive.fi under
+# ExpressiveJam did not). As an action it runs inside the caller's own job,
+# which declares the environment and passes the secret in explicitly:
+#
+#   apply:
+#     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+#     runs-on: ubuntu-latest
+#     environment: production
+#     concurrency:
+#       group: dns-apply
+#       cancel-in-progress: false
+#     steps:
+#       - uses: Tapiiri/dns-as-code/actions/apply@main
+#         with:
+#           hetzner-token: ${{ secrets.HETZNER_TOKEN }}
+
+name: dns-as-code apply
+description: Validate and apply a domain repo's zones to Hetzner with octoDNS
+
+inputs:
+  hetzner-token:
+    description: Hetzner Cloud API token, read and write
+    required: true
+  config-file:
+    description: octoDNS config, relative to the repo root
+    default: config/production.yaml
+
+runs:
+  using: composite
+  steps:
+    - name: Refuse anything but main
+      if: github.ref != 'refs/heads/main'
+      shell: bash
+      run: |
+        echo "::error::apply runs only for refs/heads/main, not $GITHUB_REF"
+        exit 1
+
+    - uses: actions/checkout@v5
+
+    # The guard `just sync` had: apply only the commit that is main right now.
+    # If main has moved, a newer run is queued and will apply it.
+    - name: Check this commit is still the tip of main
+      id: tip
+      shell: bash
+      run: |
+        git fetch --depth=1 origin main
+        tip="$(git rev-parse FETCH_HEAD)"
+        if [ "$tip" != "$GITHUB_SHA" ]; then
+          echo "::notice::main is now $tip, not $GITHUB_SHA; leaving it to the newer run"
+          echo "current=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "current=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - uses: cachix/install-nix-action@v31
+      if: steps.tip.outputs.current == 'true'
+
+    - name: Build octoDNS
+      if: steps.tip.outputs.current == 'true'
+      shell: bash
+      run: nix build .#octodns --out-link octodns
+
+    - name: Validate
+      if: steps.tip.outputs.current == 'true'
+      shell: bash
+      env:
+        HETZNER_TOKEN: dummy-token-for-validate-only
+        CONFIG_FILE: ${{ inputs.config-file }}
+      run: |
+        octodns/bin/octodns-validate --config-file "$CONFIG_FILE"
+        if grep -rn -e '__DOMAIN__' -e '__MIGADU_VERIFY_TOKEN__' zones/; then
+          echo "::error::unreplaced template placeholder in zones/"
+          exit 1
+        fi
+
+    # --doit prints the plan before applying it, so the log records exactly
+    # what changed.
+    - name: Apply
+      if: steps.tip.outputs.current == 'true'
+      shell: bash
+      env:
+        HETZNER_TOKEN: ${{ inputs.hetzner-token }}
+        CONFIG_FILE: ${{ inputs.config-file }}
+      run: |
+        if [ -z "$HETZNER_TOKEN" ]; then
+          echo "::error::the Hetzner token is empty: pass secrets.HETZNER_TOKEN from a job with environment: production"
+          exit 1
+        fi
+        octodns/bin/octodns-sync --config-file "$CONFIG_FILE" --doit

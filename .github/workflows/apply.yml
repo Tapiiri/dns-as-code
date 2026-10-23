@@ -1,5 +1,10 @@
 # Reusable: apply the calling domain repo's main to its zone.
 #
+# Works only for domain repos owned by the same account as dns-as-code: the
+# read-write token is an environment secret, and environment secrets do not
+# reach a reusable workflow across owners. Repos owned by anyone else use
+# actions/apply from their own job instead; it carries the same steps.
+#
 # The git remote is the source of truth and DNS follows it. This runs only for
 # a push to main, so only a commit that won the push is ever applied, and it
 # refuses unless that commit is still the tip of main: an older run must never
