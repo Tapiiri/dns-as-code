@@ -19,7 +19,7 @@
 #       group: dns-apply
 #       cancel-in-progress: false
 #     steps:
-#       - uses: Tapiiri/dns-as-code/actions/apply@main
+#       - uses: Tapiiri/dns-as-code/actions/apply@<commit> # vX.Y.Z
 #         with:
 #           hetzner-token: ${{ secrets.HETZNER_TOKEN }}
 
@@ -44,7 +44,7 @@ runs:
         echo "::error::apply runs only for refs/heads/main, not $GITHUB_REF"
         exit 1
 
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
     # The guard `just sync` had: apply only the commit that is main right now.
     # If main has moved, a newer run is queued and will apply it.
@@ -61,7 +61,7 @@ runs:
           echo "current=true" >> "$GITHUB_OUTPUT"
         fi
 
-    - uses: cachix/install-nix-action@v31
+    - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
       if: steps.tip.outputs.current == 'true'
 
     - name: Build octoDNS

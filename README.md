@@ -47,7 +47,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: Tapiiri/dns-as-code/.github/workflows/plan.yml@main
+    uses: Tapiiri/dns-as-code/.github/workflows/plan.yml@<commit> # vX.Y.Z
     secrets:
       hetzner-token-ro: ${{ secrets.HETZNER_TOKEN_RO }}
 
@@ -59,10 +59,21 @@ jobs:
       group: dns-apply
       cancel-in-progress: false
     steps:
-      - uses: Tapiiri/dns-as-code/actions/apply@main
+      - uses: Tapiiri/dns-as-code/actions/apply@<commit> # vX.Y.Z
         with:
           hetzner-token: ${{ secrets.HETZNER_TOKEN }}
 ```
+
+## Versions
+
+Domain repos pin dns-as-code to a release's full commit SHA, with the version
+as a comment, never `@main` and never a bare tag: the apply job holds the
+read-write token, so what it runs changes only through a reviewed PR in the
+domain repo. Inside this repo, third-party actions are pinned the same way.
+
+To release: tag the commit `vX.Y.Z` here. To upgrade a domain repo: replace
+the SHA and comment on every `Tapiiri/dns-as-code/...@` line in its
+`.github/workflows/dns.yml`; its plan comment shows whether DNS would change.
 
 Apply is an action, not a reusable workflow, because GitHub does not pass an
 environment secret into a reusable workflow owned by another account. Declaring
