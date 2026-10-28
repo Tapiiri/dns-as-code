@@ -2,7 +2,19 @@
 
 Shared tooling for per-domain DNS repos: octoDNS reconciling a Hetzner DNS zone from
 YAML, run from GitHub Actions so no local machine is needed. Each domain keeps its own
-private repo, Hetzner project and tokens; only the tooling lives here.
+repo, Hetzner project and tokens; only the tooling lives here.
+
+To start a new domain, create a repo from
+[dns-domain-template](https://github.com/Tapiiri/dns-domain-template) and follow its
+README. The rest of this page describes the pieces it uses.
+
+You need:
+
+- a zone in [Hetzner DNS](https://docs.hetzner.com/networking/dns/), and two Hetzner
+  Cloud API tokens for its project, one read-only and one read and write;
+- a GitHub repo for the domain, with Actions enabled.
+
+Nix is used on the runners only; nothing needs installing locally.
 
 ## What is here
 
@@ -13,7 +25,8 @@ private repo, Hetzner project and tokens; only the tooling lives here.
 | `.github/workflows/dump.yml` | Reusable workflow, run by hand: read a live zone from Hetzner and print it as YAML, for onboarding a zone that already has records |
 | `.github/workflows/onboard.yml` | Reusable workflow, run by hand in a repo that manages no zones yet: dump a live zone, write its zone file and config, require a zero-change plan, push branch `onboard/<zone>` to open as a PR |
 | `actions/apply/action.yml` | Composite action, used from the domain repo's own apply job: validate and `octodns-sync --doit` with the read-write token |
-| `docs/` | Spike findings and provider research carried over from kanerva.io |
+| `record-sets/` | Records for common services, such as Migadu mail, to copy into a zone file |
+| `docs/` | Spike findings and provider research from the first domain repo |
 
 ## Using it from a domain repo
 
@@ -65,6 +78,13 @@ jobs:
           hetzner-token: ${{ secrets.HETZNER_TOKEN }}
 ```
 
+## Record sets
+
+`record-sets/` holds the records a service needs, with `__NAME__` placeholders for
+the per-domain parts. Copy the records into the zone file in a PR and replace the
+placeholders; the file's header says how to merge with records already there. Plan
+and apply fail while any `__NAME__` placeholder is left under `zones/`.
+
 ## Versions
 
 Domain repos pin dns-as-code to a release's full commit SHA, with the version
@@ -90,3 +110,7 @@ tip of main, so DNS always converges on the newest main.
 
 `config/production.yaml` must set `backend: hcloud` on the Hetzner provider; the
 provider's default points at the DNS API Hetzner removed in May 2026.
+
+## License
+
+[MIT](LICENSE).

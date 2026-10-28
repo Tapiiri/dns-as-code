@@ -7,7 +7,7 @@
 #
 # Why an action and not a reusable workflow: the read-write token is an
 # environment secret, and environment secrets do not reach a reusable workflow
-# owned by a different account (expressive.fi, under ExpressiveJam, found it
+# owned by a different account (a domain repo under another owner finds it
 # empty on every run). As an action it runs inside the caller's own job, which
 # declares the environment and passes the secret in explicitly:
 #
@@ -88,7 +88,7 @@ runs:
         CONFIG_FILE: ${{ inputs.config-file }}
       run: |
         octodns/bin/octodns-validate --config-file "$CONFIG_FILE"
-        if grep -rn -e '__DOMAIN__' -e '__MIGADU_VERIFY_TOKEN__' zones/; then
+        if grep -rnE '__[A-Z][A-Z0-9_]*__' zones/; then
           echo "::error::unreplaced template placeholder in zones/"
           exit 1
         fi

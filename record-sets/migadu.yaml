@@ -1,0 +1,84 @@
+# Migadu mail record set.
+#
+# Copy these records into zones/<domain>.yaml and replace both placeholders:
+#   __DOMAIN__                 the bare domain, e.g. example.com
+#   __MIGADU_VERIFY_TOKEN__    the per-domain token from the Migadu admin panel
+#
+# Plan and apply fail while any __NAME__ placeholder is left under zones/.
+#
+# Merging into a zone that already has records:
+# - Record names are sorted alphabetically (octoDNS enforce_order), so insert
+#   each name in its place rather than appending the block.
+# - The apex ('') holds a list, one entry per record type. If the zone already
+#   has apex records, add the MX and TXT entries to that list. Keep the apex NS
+#   records: omitting them plans a nameserver deletion.
+# - If the apex already has a TXT record, add these values to it; a name holds
+#   one record per type.
+#
+# Semicolons in TXT values are escaped as `\;`.
+
+'':
+  - ttl: 3600
+    type: MX
+    values:
+      - exchange: aspmx1.migadu.com.
+        preference: 10
+      - exchange: aspmx2.migadu.com.
+        preference: 20
+  - ttl: 3600
+    type: TXT
+    values:
+      - hosted-email-verify=__MIGADU_VERIFY_TOKEN__
+      - v=spf1 include:spf.migadu.com -all
+
+_autodiscover._tcp:
+  ttl: 3600
+  type: SRV
+  value:
+    port: 443
+    priority: 0
+    target: autodiscover.migadu.com.
+    weight: 1
+
+_dmarc:
+  ttl: 3600
+  type: TXT
+  value: v=DMARC1\; p=quarantine\;
+
+_imaps._tcp:
+  ttl: 3600
+  type: SRV
+  value:
+    port: 993
+    priority: 0
+    target: imap.migadu.com.
+    weight: 1
+
+_submissions._tcp:
+  ttl: 3600
+  type: SRV
+  value:
+    port: 465
+    priority: 0
+    target: smtp.migadu.com.
+    weight: 1
+
+autoconfig:
+  ttl: 3600
+  type: CNAME
+  value: autoconfig.migadu.com.
+
+key1._domainkey:
+  ttl: 3600
+  type: CNAME
+  value: key1.__DOMAIN__._domainkey.migadu.com.
+
+key2._domainkey:
+  ttl: 3600
+  type: CNAME
+  value: key2.__DOMAIN__._domainkey.migadu.com.
+
+key3._domainkey:
+  ttl: 3600
+  type: CNAME
+  value: key3.__DOMAIN__._domainkey.migadu.com.

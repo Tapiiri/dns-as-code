@@ -48,7 +48,7 @@ jobs:
           CONFIG_FILE: ${{ inputs.config-file }}
         run: |
           octodns/bin/octodns-validate --config-file "$CONFIG_FILE"
-          if grep -rn -e '__DOMAIN__' -e '__MIGADU_VERIFY_TOKEN__' zones/; then
+          if grep -rnE '__[A-Z][A-Z0-9_]*__' zones/; then
             echo "::error::unreplaced template placeholder in zones/"
             exit 1
           fi
