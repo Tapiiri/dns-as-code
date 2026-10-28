@@ -1,0 +1,160 @@
+# Reusable: start managing a zone that already lives in Hetzner.
+#
+# For a domain repo fresh from the template, whose config lists no zones yet.
+# Dumps the live zone with the read-only token, writes the zone file and lists
+# the zone in the config together, and proves the result with a plan that must
+# show no changes. Then pushes branch `onboard/<zone>` for a person to open as a
+# PR.
+#
+# It cannot open the PR itself: GitHub starts no workflows for events caused by
+# the built-in workflow token, so the required plan check would never report on
+# a workflow-opened PR. Writing the zone file and the config in one commit is
+# deliberate: a zone listed before its file exists fails validation.
+#
+# The caller grants `contents: write` so the branch can be pushed. Nothing here
+# writes to DNS.
+
+name: onboard
+
+on:
+  workflow_call:
+    inputs:
+      zone:
+        description: Zone to start managing, e.g. example.com
+        type: string
+        required: true
+      config-file:
+        description: octoDNS config, relative to the caller's repo root
+        type: string
+        default: config/production.yaml
+    secrets:
+      hetzner-token-ro:
+        description: Hetzner Cloud API token, read-only
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  onboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Check the repo is ready to onboard
+        id: check
+        env:
+          ZONE: ${{ inputs.zone }}
+          CONFIG_FILE: ${{ inputs.config-file }}
+        run: |
+          zone="${ZONE%.}"
+          if ! [[ "$zone" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]]; then
+            echo "::error::not a zone name: $ZONE"
+            exit 1
+          fi
+          if ! grep -qx 'zones: {}' "$CONFIG_FILE"; then
+            echo "::error::$CONFIG_FILE already lists zones; onboard is for a repo that manages none yet"
+            exit 1
+          fi
+          if [ -e "zones/${zone}.yaml" ]; then
+            echo "::error::zones/${zone}.yaml already exists"
+            exit 1
+          fi
+          if git ls-remote --exit-code --heads origin "onboard/${zone}" > /dev/null; then
+            echo "::error::branch onboard/${zone} already exists; delete it to onboard again"
+            exit 1
+          fi
+          echo "zone=${zone}" >> "$GITHUB_OUTPUT"
+
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+
+      - name: Build octoDNS
+        run: nix build .#octodns --out-link octodns
+
+      # Same throwaway config as the dump workflow: octodns-dump only reads
+      # zones listed in a config, and the repo's own config lists none yet.
+      - name: Dump the live zone
+        env:
+          HETZNER_TOKEN: ${{ secrets.hetzner-token-ro }}
+          ZONE: ${{ steps.check.outputs.zone }}
+        run: |
+          if [ -z "$HETZNER_TOKEN" ]; then
+            echo "::error::the read-only Hetzner token secret is empty or not set"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/dump"
+          cat > "$RUNNER_TEMP/dump.yaml" <<EOF
+          providers:
+            hetzner:
+              class: octodns_hetzner.HetznerProvider
+              backend: hcloud
+              token: env/HETZNER_TOKEN
+          zones:
+            ${ZONE}.:
+              sources:
+                - hetzner
+              targets: []
+          EOF
+          octodns/bin/octodns-dump --config-file "$RUNNER_TEMP/dump.yaml" \
+            --output-dir "$RUNNER_TEMP/dump" "${ZONE}." hetzner
+
+      - name: Write the zone file and list the zone
+        env:
+          ZONE: ${{ steps.check.outputs.zone }}
+          CONFIG_FILE: ${{ inputs.config-file }}
+        run: |
+          mkdir -p zones
+          rm -f zones/.gitkeep
+          {
+            echo "# ${ZONE}, dumped from Hetzner by the onboard workflow."
+            echo "#"
+            echo "# octoDNS owns this zone completely: anything in Hetzner that is absent"
+            echo "# here gets deleted. Do not edit the zone in the Hetzner Console."
+            cat "$RUNNER_TEMP/dump/${ZONE}.yaml"
+          } > "zones/${ZONE}.yaml"
+          sed -i "s/^zones: {}\$/zones:\n  ${ZONE}.:\n    sources:\n      - config\n    targets:\n      - hetzner/" "$CONFIG_FILE"
+          git diff --stat
+
+      - name: Validate
+        env:
+          HETZNER_TOKEN: dummy-token-for-validate-only
+          CONFIG_FILE: ${{ inputs.config-file }}
+        run: octodns/bin/octodns-validate --config-file "$CONFIG_FILE"
+
+      # The dump must reproduce the live zone exactly. Anything else here would
+      # become a change on the first apply, so it stops the onboarding.
+      - name: Plan, which must show no changes
+        env:
+          HETZNER_TOKEN: ${{ secrets.hetzner-token-ro }}
+          CONFIG_FILE: ${{ inputs.config-file }}
+        run: |
+          set -o pipefail
+          octodns/bin/octodns-sync --quiet --config-file "$CONFIG_FILE" 2>&1 | tee plan.txt
+          if ! grep -q '^No changes were planned$' plan.txt; then
+            echo "::error::the dumped zone does not plan as zero changes; not pushing"
+            exit 1
+          fi
+          rm plan.txt
+
+      - name: Push branch onboard/<zone>
+        env:
+          ZONE: ${{ steps.check.outputs.zone }}
+          CONFIG_FILE: ${{ inputs.config-file }}
+        run: |
+          branch="onboard/${ZONE}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add -A zones "$CONFIG_FILE"
+          git commit -q -m "feat(zones): manage ${ZONE}, starting from the live zone" \
+            -m "Dumped from Hetzner by the onboard workflow; the plan for this commit showed no changes."
+          git push -q origin "$branch"
+          url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/main...${branch}?expand=1"
+          {
+            echo "### Onboarded \`${ZONE}\`"
+            echo
+            echo "Branch \`${branch}\` holds the zone file and config; its plan showed no changes."
+            echo
+            echo "**Open the pull request:** ${url}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::open the pull request: ${url}"

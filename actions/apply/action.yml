@@ -48,10 +48,21 @@ runs:
 
     # The guard `just sync` had: apply only the commit that is main right now.
     # If main has moved, a newer run is queued and will apply it.
-    - name: Check this commit is still the tip of main
+    #
+    # A repo fresh from the template lists no zones yet (`zones: {}`) and may
+    # not have its secrets either, so there is nothing to apply: skip with a
+    # notice rather than fail its first push.
+    - name: Check there is something to apply
       id: tip
       shell: bash
+      env:
+        CONFIG_FILE: ${{ inputs.config-file }}
       run: |
+        if grep -qx 'zones: {}' "$CONFIG_FILE"; then
+          echo "::notice::no zones listed in $CONFIG_FILE yet; nothing to apply"
+          echo "current=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
         git fetch --depth=1 origin main
         tip="$(git rev-parse FETCH_HEAD)"
         if [ "$tip" != "$GITHUB_SHA" ]; then
